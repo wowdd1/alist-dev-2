@@ -1,41 +1,48 @@
-name: 'release alist'
+name: build
 
 on:
-  workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [ 'main' ]
+  pull_request:
+    branches: [ 'main' ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  build:
+    strategy:
+      matrix:
+        platform: [ubuntu-latest]
+        go-version: [ '1.21' ]
+    name: Build
+    runs-on: ${{ matrix.platform }}
     steps:
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+
       - name: Checkout
-        uses: actions/checkout@v3
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-      - name: Login to Docker Hub
-        uses: docker/login-action@v2
+        uses: actions/checkout@v4
+
+      - uses: benjlevesque/short-sha@v2.2
+        id: short-sha
+
+      - name: Install dependencies
+        run: |
+          sudo snap install zig --classic --beta
+          docker pull crazymax/xgo:latest
+          go install github.com/crazy-max/xgo@latest
+          sudo apt install upx
+
+      - name: Build
+        run: |
+          bash build.sh dev
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Build docker and push
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          file: Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/alist:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-      - name: Build hostmode docker and push
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          file: Dockerfile-host
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/alist:hostmode
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          name: alist
+          path: dist
